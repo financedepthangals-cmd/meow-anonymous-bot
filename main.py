@@ -20,8 +20,8 @@ def run_flask():
 
 # ===== CONFIGURATION =====
 BOT_TOKEN = "8369427535:AAEER6sj5fvK7ODxk88PqB_31TAFHbsdY-U"
-CHANNEL_ID = -1001003708912162
-CHANNEL_LINK = 'https://t.me/+JjlYWwKitc5lODJk'
+CHANNEL_ID = -1003636238775
+CHANNEL_LINK = 'https://t.me/+_iRGCat--tk1MmNk'
 ADMIN_ID = 8438801421
 
 # Enable logging
