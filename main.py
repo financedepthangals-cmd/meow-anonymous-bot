@@ -100,24 +100,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     welcome_text = """
-👋 Welcome to Meow Anonymous Bot!
-
-🔒 Share anything anonymously! Your identity is 100% protected.
-
-What you can send:
-📸 Photos
-💬 Messages  
-🎥 Videos
-🎤 Voice messages
-📎 Documents
-
-How it works:
-1️⃣ Send your content here
-2️⃣ Admin reviews it (without revealing your identity to others)
-3️⃣ Once approved, it posts anonymously to the channel
-4️⃣ No one in the channel knows who posted
-
-👇 Click to view the anonymous channel:
+🎭 Share your fantasies, secrets & everything discreet.
+🔒 100% Anonymous — No one will ever know it was you.
+👇 Send anything now
 """
 
     await update.message.reply_text(welcome_text, reply_markup=reply_markup)
