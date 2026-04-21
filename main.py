@@ -4,6 +4,7 @@ import re
 import sqlite3
 import time
 from datetime import datetime
+from urllib.parse import quote
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import RetryAfter
@@ -28,6 +29,8 @@ GROUP_LINK = "https://t.me/+A93ERrKixbw5MTNk"
 POST_HEADER = "💬 Love Chat ❤️\n🫥 Anonymous via Samadanam\n\n"
 
 ADMIN_IDS = {8438801421}
+ADMIN_LOG_ENABLED = True
+ADMIN_LOG_CHAT_ID = 8438801421
 
 MIN_SEND_INTERVAL = 1.8
 GROUP_REMINDER_COOLDOWN = 3600
@@ -170,6 +173,16 @@ def get_referral_link(user_id):
     return f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
 
 
+def get_share_link(user_id):
+    ref_link = get_referral_link(user_id)
+    share_text = (
+        "🫥 Samadanam — Share secrets, fantasies and confessions anonymously.\n\n"
+        "💬 Join our Love Chat ❤️ group for spicy anonymous posts.\n"
+        "🤖 Start the bot:"
+    )
+    return f"https://t.me/share/url?url={quote(ref_link)}&text={quote(share_text)}"
+
+
 # ================== HELPERS ==================
 
 def get_text_or_caption(message):
@@ -219,8 +232,40 @@ async def delete_later(message, delay=20):
 def start_keyboard(user_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("❤️ Join Love Chat Group", url=GROUP_LINK)],
-        [InlineKeyboardButton("📨 Invite Friends", url=get_referral_link(user_id))]
+        [InlineKeyboardButton("📨 Invite Friends", url=get_share_link(user_id))]
     ])
+
+
+async def send_admin_log(context, user, post_type, text=None, file_id=None, caption=None):
+    if not ADMIN_LOG_ENABLED:
+        return
+
+    username = f"@{user.username}" if user.username else "No username"
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "No name"
+    header = (
+        f"🫥 New anonymous post\n"
+        f"👤 Name: {full_name}\n"
+        f"📧 Username: {username}\n"
+        f"🆔 User ID: {user.id}\n"
+        f"📦 Type: {post_type}\n"
+        "─────────────"
+    )
+
+    try:
+        await context.bot.send_message(chat_id=ADMIN_LOG_CHAT_ID, text=header)
+
+        if post_type == "text":
+            await context.bot.send_message(chat_id=ADMIN_LOG_CHAT_ID, text=text or "")
+        elif post_type == "photo":
+            await context.bot.send_photo(chat_id=ADMIN_LOG_CHAT_ID, photo=file_id, caption=caption or "")
+        elif post_type == "video":
+            await context.bot.send_video(chat_id=ADMIN_LOG_CHAT_ID, video=file_id, caption=caption or "")
+        elif post_type == "voice":
+            await context.bot.send_voice(chat_id=ADMIN_LOG_CHAT_ID, voice=file_id)
+        elif post_type == "document":
+            await context.bot.send_document(chat_id=ADMIN_LOG_CHAT_ID, document=file_id, caption=caption or "")
+    except Exception as e:
+        logger.warning(f"Admin log failed: {e}")
 
 
 # ================== POSTING ==================
@@ -387,6 +432,15 @@ async def submit_private(update, context, post_type):
         caption = message.caption or ""
 
     await message.reply_text("✅ Received. Posting anonymously now...")
+
+    await send_admin_log(
+        context=context,
+        user=user,
+        post_type=post_type,
+        text=text,
+        file_id=file_id,
+        caption=caption
+    )
 
     success = await post_to_group(
         context=context,
