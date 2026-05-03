@@ -12,11 +12,11 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InlineQueryResultArticle,
+    InputMediaPhoto,
     InputTextMessageContent,
     Update,
 )
-from telegram.constants import ParseMode
-from telegram.error import RetryAfter, TelegramError
+from telegram.error import RetryAfter
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -45,18 +45,21 @@ ADMIN_LOG_CHAT_ID = 8438801421
 QR_WATERMARK_ENABLED = False  # Flip True at 10K members
 IMAGE_MODERATION_ENABLED = False  # Flip True at 1K members
 
-# Anti-spam
-MIN_SEND_INTERVAL = 1.8
-USER_SUBMIT_LIMIT = 5
-USER_SUBMIT_WINDOW = 3600  # 1 hour
+# UNLIMITED posting for users
+MIN_SEND_INTERVAL = 1.8   # bot's safety throttle to Telegram (don't change)
+USER_SUBMIT_LIMIT = 0     # 0 = unlimited posts per user
+USER_SUBMIT_WINDOW = 3600
 GROUP_REMINDER_COOLDOWN = 3600
+
+# Invite reminder frequency
+INVITE_REMINDER_CHANCE = 0.33  # 33% of submissions get invite nudge
 
 # Autopilot timing
 AUTOPOST_MIN_IDLE = 35 * 60
 AUTOPOST_MAX_IDLE = 75 * 60
 AUTOPOST_MIN_GAP = 25 * 60
 AUTOPOST_MAX_GAP = 90 * 60
-HUMAN_ACTIVITY_BUFFER = 15 * 60  # Skip bot drops if humans active in last 15 min
+HUMAN_ACTIVITY_BUFFER = 15 * 60
 
 # Recycling
 RECYCLE_MIN_AGE_HOURS = 24
@@ -65,7 +68,7 @@ RECYCLE_MIN_INTERVAL = 2 * 3600
 RECYCLE_MAX_INTERVAL = 4 * 3600
 
 # Queen Battles
-BATTLE_MIN_GAP = 90 * 60  # 90 min between battles
+BATTLE_MIN_GAP = 90 * 60
 BATTLE_PHOTO_COOLDOWN_DAYS = 14
 BATTLE_MIN_ARCHIVE = 10
 BATTLE_DAILY_MIN = 2
@@ -76,10 +79,8 @@ MEDIA_COMMENT_CHANCE = 0.45
 TEXT_COMMENT_CHANCE = 0.07
 FOLLOWUP_CHANCE = 0.20
 
-# Database
 DB_PATH = "samadanam_bot.db"
 
-# Link / banned content filters
 LINK_REGEX = re.compile(
     r"(https?://\S+|www\.\S+|t\.me/\S+|telegram\.me/\S+|"
     r"\b[a-zA-Z0-9-]+\.(com|net|org|io|me|in|co|app|ai|gg|ly|to|tv|info|biz|xyz|site|online|store|shop|cc|pk|uk|us|de|ru)\b)",
@@ -95,14 +96,12 @@ BANNED_TERMS = [
     "free money click", "double your money", "send btc to",
 ]
 
-# Logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Database
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.row_factory = sqlite3.Row
 
@@ -205,7 +204,9 @@ def is_banned(user_id):
 
 
 def can_submit(user_id):
-    """Rate limit: USER_SUBMIT_LIMIT per USER_SUBMIT_WINDOW seconds."""
+    """Always returns True when USER_SUBMIT_LIMIT = 0 (unlimited)."""
+    if USER_SUBMIT_LIMIT == 0:
+        return True
     cutoff = datetime.utcnow().timestamp() - USER_SUBMIT_WINDOW
     count = db.execute(
         "SELECT COUNT(*) FROM submissions WHERE user_id=? AND submitted_at >= datetime(?, 'unixepoch')",
@@ -496,7 +497,6 @@ POLLS = [
 def pick_engagement_text():
     use_ml = random.random() < 0.5
 
-    # 20% chance: bot reminder
     if random.random() < 0.20:
         return random.choice(BOT_REMINDERS_ML if use_ml else BOT_REMINDERS_EN)
 
@@ -522,7 +522,7 @@ def pick_followup():
     return random.choice(FOLLOWUP_ML if use_ml else FOLLOWUP_EN)
 
 
-# ================== POSTING (flood-control safe) ==================
+# ================== POSTING ==================
 
 async def safe_send(coro):
     """Wrap a send call with flood-control retry."""
@@ -584,7 +584,7 @@ async def send_admin_log(context, user, post_type, text=None, file_id=None, capt
 
 WELCOME_ML = """🫥 സമാദാനത്തിലേക്ക് സ്വാഗതം.
 
-📩 Anonymous ആയി ഇടാം. പേര് മറയ്ക്കും.
+📩 Anonymous ആയി ഇടാം. പേര് മറയ്ക്കും. ♾️ No limits.
 👥 ഇഷ്ടപ്പെട്ടോ? ഒരു friend നെ invite ചെയ്യൂ. നമുക്ക് ഇത് massive ആക്കാം 🔥
 
 🚫 Links allowed alla
@@ -592,7 +592,7 @@ WELCOME_ML = """🫥 സമാദാനത്തിലേക്ക് സ്വ�
 
 WELCOME_EN = """🫥 Welcome to Samadanam.
 
-📩 Post anonymously. Your name stays hidden.
+📩 Post anonymously. Your name stays hidden. ♾️ No limits.
 👥 Liked it? Bring one friend. Let's make this massive 🔥
 
 🚫 No links allowed
@@ -631,7 +631,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(welcome, reply_markup=start_keyboard(user.id))
 
-    # Notify referrer if applicable
     if referrer_id:
         upgrade = update_tier_if_changed(referrer_id, context.application)
         if upgrade:
@@ -652,7 +651,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🫥 സമാദാനം — How to use\n\n"
         "📩 Send any text, photo, video, voice, or file to me.\n"
         "✅ It posts anonymously to Love Chat ❤️\n"
-        "🔒 Your name stays hidden.\n\n"
+        "🔒 Your name stays hidden.\n"
+        "♾️ No limits — post as much as you want.\n\n"
         "Commands:\n"
         "/start — Welcome + your stats\n"
         "/invite — Get share messages\n"
@@ -661,7 +661,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help — This message\n\n"
         "🚫 No links\n"
         "🚫 No minors / illegal content\n\n"
-        "📩 ഏതും anonymous ആയി ഇടാം — text, photo, video, voice, file."
+        "📩 ഏതും anonymous ആയി ഇടാം — text, photo, video, voice, file. No limit."
     )
     await update.message.reply_text(text)
 
@@ -784,7 +784,8 @@ async def autopilot_status(update, context):
         f"Last bot post: {last_post}s ago\n"
         f"Archive size: {arc_count}\n"
         f"Users tracked: {user_count}\n"
-        f"Today's battles: {TODAYS_BATTLES_DONE}/{TODAYS_BATTLES_PLANNED}"
+        f"Today's battles: {TODAYS_BATTLES_DONE}/{TODAYS_BATTLES_PLANNED}\n"
+        f"Submit limit: {'unlimited ♾️' if USER_SUBMIT_LIMIT == 0 else f'{USER_SUBMIT_LIMIT}/hr'}"
     )
 
 
@@ -912,19 +913,16 @@ async def submit_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     upsert_user(user)
 
-    # Rate limit
+    # Unlimited posting — can_submit() returns True instantly when limit=0
     if not can_submit(user.id):
-        await msg.reply_text("⏳ Slow down — too many posts. Try again later.")
         return
 
     text = msg.text or msg.caption or ""
 
-    # Link block
     if contains_link(text):
         await msg.reply_text("🚫 Links not allowed.")
         return
 
-    # Banned content
     if contains_banned(text):
         with db:
             db.execute("INSERT OR REPLACE INTO bans (user_id, reason) VALUES (?, ?)",
@@ -939,7 +937,6 @@ async def submit_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return
 
-    # Determine type and post
     posted = False
     file_id = None
     media_type = "text"
@@ -995,7 +992,7 @@ async def submit_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if posted:
         log_submission(user.id)
-        # Save to archive (photo/video only — what battles + recycling use)
+
         if media_type in ("photo", "video", "animation"):
             with db:
                 db.execute("""
@@ -1003,7 +1000,28 @@ async def submit_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     VALUES (?, ?, ?, ?)
                 """, (file_id, media_type, caption, user.id))
 
-        await msg.reply_text("✅ Posted anonymously in Love Chat ❤️")
+        # 33% of posts get an invite reminder, bilingual
+        if random.random() < INVITE_REMINDER_CHANCE:
+            ref_link = get_referral_link(user.id)
+            use_ml = random.random() < 0.5
+            if use_ml:
+                reminder = (
+                    f"✅ Posted anonymously ❤️\n\n"
+                    f"🚀 സമാദാനം grow ചെയ്യണം! ഒരു friend നെ invite ചെയ്യൂ:\n"
+                    f"👉 {ref_link}\n\n"
+                    f"🏆 Top inviters get featured + custom titles."
+                )
+            else:
+                reminder = (
+                    f"✅ Posted anonymously ❤️\n\n"
+                    f"🚀 Help Samadanam grow! Invite one friend:\n"
+                    f"👉 {ref_link}\n\n"
+                    f"🏆 Top inviters get featured + custom titles."
+                )
+            await msg.reply_text(reminder)
+        else:
+            await msg.reply_text("✅ Posted anonymously in Love Chat ❤️")
+
         await send_admin_log(context, user, media_type, text=msg.text, file_id=file_id, caption=caption)
     else:
         await msg.reply_text("⚠️ Couldn't post — try again or send a different format.")
@@ -1012,7 +1030,6 @@ async def submit_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================== GROUP MONITOR ==================
 
 async def group_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Watch group messages — delete links, react randomly."""
     try:
         if not update.effective_chat or update.effective_chat.id != GROUP_ID:
             return
@@ -1020,7 +1037,6 @@ async def group_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not msg or not msg.from_user:
             return
 
-        # Skip bot's own messages
         if msg.from_user.is_bot:
             return
 
@@ -1028,7 +1044,6 @@ async def group_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text = msg.text or msg.caption or ""
 
-        # Block links from non-admins
         if contains_link(text) and msg.from_user.id not in ADMIN_IDS:
             try:
                 await msg.delete()
@@ -1040,7 +1055,6 @@ async def group_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-        # Block banned content
         if contains_banned(text):
             try:
                 await msg.delete()
@@ -1052,7 +1066,6 @@ async def group_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             return
 
-        # Random media reaction
         if (msg.photo or msg.video or msg.animation) and random.random() < MEDIA_COMMENT_CHANCE:
             await asyncio.sleep(random.randint(4, 18))
             try:
@@ -1063,7 +1076,6 @@ async def group_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception:
                 pass
-            # Plus a media reminder to use bot
             if random.random() < 0.4:
                 await asyncio.sleep(random.randint(20, 60))
                 try:
@@ -1075,7 +1087,6 @@ async def group_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
             return
 
-        # Random text reaction
         if msg.text and len(msg.text) > 10 and random.random() < TEXT_COMMENT_CHANCE:
             await asyncio.sleep(random.randint(3, 12))
             try:
@@ -1094,7 +1105,6 @@ async def group_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================== SILENT GROUP MODE ==================
 
 async def auto_delete_service(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Delete service messages — joins, leaves, adds, etc."""
     try:
         if not update.effective_chat or update.effective_chat.id != GROUP_ID:
             return
@@ -1125,7 +1135,6 @@ async def auto_delete_service(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def send_engagement_post(application):
     global LAST_AUTOPILOT_POST_TS
 
-    # Skip dawn 4-8 AM (recycle-only mode)
     if is_dawn():
         return
 
@@ -1156,7 +1165,6 @@ async def send_engagement_post(application):
 
 
 async def do_recycle(application):
-    """Engine 2 — recycle a random old archive item with original caption only."""
     global LAST_RECYCLE_TS
 
     cutoff = datetime.utcnow().timestamp() - (RECYCLE_MIN_AGE_HOURS * 3600)
@@ -1199,7 +1207,6 @@ async def do_recycle(application):
 
 
 async def do_battle(application):
-    """Engine 3 — Queen Battle. 2 random archive photos + locked header + poll."""
     global LAST_BATTLE_TS, TODAYS_BATTLES_DONE
 
     cooldown_cutoff = datetime.utcnow().timestamp() - (BATTLE_PHOTO_COOLDOWN_DAYS * 86400)
@@ -1223,18 +1230,14 @@ async def do_battle(application):
         header = "👑💦 Queen Battle 👑\nTonight's duel. Pick your side."
 
     try:
-        # Send header
         await safe_send(application.bot.send_message(chat_id=GROUP_ID, text=header))
 
-        # Send photos as media group
-        from telegram import InputMediaPhoto
         media = [
             InputMediaPhoto(media=rows[0]["file_id"], caption="👈 Left"),
             InputMediaPhoto(media=rows[1]["file_id"], caption="👉 Right"),
         ]
         await safe_send(application.bot.send_media_group(chat_id=GROUP_ID, media=media))
 
-        # Send poll
         await safe_send(application.bot.send_poll(
             chat_id=GROUP_ID,
             question="ആരാ winner? / Who wins?",
@@ -1243,7 +1246,6 @@ async def do_battle(application):
             allows_multiple_answers=False,
         ))
 
-        # Mark both as used
         with db:
             for r in rows:
                 db.execute("UPDATE archive SET last_battle_at=CURRENT_TIMESTAMP WHERE id=?", (r["id"],))
@@ -1257,7 +1259,6 @@ async def do_battle(application):
 
 
 def plan_today_battles():
-    """Plan how many battles today based on archive size."""
     global TODAYS_BATTLES_PLANNED, TODAYS_BATTLES_DONE, TODAYS_BATTLE_DATE
 
     today = datetime.now().strftime("%Y-%m-%d")
@@ -1283,7 +1284,6 @@ def plan_today_battles():
 
 
 async def autopilot_loop(application):
-    """Master loop — runs all 3 engines."""
     global LAST_GROUP_ACTIVITY_TS, LAST_AUTOPILOT_POST_TS, LAST_RECYCLE_TS, LAST_BATTLE_TS
 
     while True:
@@ -1292,29 +1292,26 @@ async def autopilot_loop(application):
             now = time.time()
             human_idle = now - LAST_GROUP_ACTIVITY_TS
 
-            # Engine 1 — Engagement
             if AUTO_PILOT_ENABLED and not is_dawn():
                 since_last_engage = now - LAST_AUTOPILOT_POST_TS
                 if human_idle >= NEXT_IDLE_TARGET and since_last_engage >= NEXT_GAP_TARGET:
                     await send_engagement_post(application)
 
-            # Engine 2 — Recycle (runs even in dawn, lighter)
             if RECYCLER_ENABLED:
                 since_last_recycle = now - LAST_RECYCLE_TS
                 target = NEXT_RECYCLE_TARGET * (2 if is_dawn() else 1)
-                if since_last_recycle >= target and human_idle >= 600:  # 10 min human-idle minimum
+                if since_last_recycle >= target and human_idle >= 600:
                     await do_recycle(application)
 
-            # Engine 3 — Queen Battles
             if BATTLES_ENABLED:
                 plan_today_battles()
                 since_last_battle = now - LAST_BATTLE_TS
+                hour_now = datetime.now().hour
                 if (TODAYS_BATTLES_DONE < TODAYS_BATTLES_PLANNED
                     and since_last_battle >= BATTLE_MIN_GAP
                     and human_idle >= HUMAN_ACTIVITY_BUFFER
-                    and 10 <= datetime.now().hour or datetime.now().hour < 2):
-                    # Random chance to fire each minute (spreads battles across day)
-                    hours_left = max(1, (26 - datetime.now().hour) % 26)
+                    and (10 <= hour_now or hour_now < 2)):
+                    hours_left = max(1, (26 - hour_now) % 26)
                     battles_left = TODAYS_BATTLES_PLANNED - TODAYS_BATTLES_DONE
                     fire_chance = battles_left / (hours_left * 60)
                     if random.random() < fire_chance:
@@ -1372,11 +1369,9 @@ async def error_handler(update, context):
 # ================== WEEKLY LEADERBOARD ==================
 
 async def weekly_leaderboard_loop(application):
-    """Posts leaderboard every Sunday 9 PM."""
     while True:
         try:
             now = datetime.now()
-            # Sunday = 6, target hour 21
             if now.weekday() == 6 and now.hour == 21 and now.minute < 5:
                 top = db.execute("""
                     SELECT first_name, referrals_count, tier
@@ -1400,7 +1395,7 @@ async def weekly_leaderboard_loop(application):
                         await safe_send(application.bot.send_message(chat_id=GROUP_ID, text=final))
                     except Exception:
                         pass
-                    await asyncio.sleep(3600)  # don't repost same hour
+                    await asyncio.sleep(3600)
             await asyncio.sleep(120)
         except Exception as e:
             logger.warning(f"Leaderboard loop error: {e}")
@@ -1424,14 +1419,12 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    # Public commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("mystats", mystats))
     app.add_handler(CommandHandler("invite", invite_command))
     app.add_handler(CommandHandler("share", share_command))
 
-    # Admin commands
     app.add_handler(CommandHandler("autopilot_on", autopilot_on))
     app.add_handler(CommandHandler("autopilot_off", autopilot_off))
     app.add_handler(CommandHandler("autopilot_status", autopilot_status))
@@ -1443,22 +1436,18 @@ def main():
     app.add_handler(CommandHandler("backup_db", backup_db))
     app.add_handler(CommandHandler("stats", stats))
 
-    # Inline mode
     app.add_handler(InlineQueryHandler(inline_query))
 
-    # Silent group mode (delete service messages)
     app.add_handler(MessageHandler(
         filters.StatusUpdate.ALL & filters.Chat(GROUP_ID),
         auto_delete_service
     ))
 
-    # Group monitor (links + reactions)
     app.add_handler(MessageHandler(
         filters.Chat(GROUP_ID) & ~filters.StatusUpdate.ALL,
         group_monitor
     ))
 
-    # Private submissions
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & ~filters.COMMAND,
         submit_private
