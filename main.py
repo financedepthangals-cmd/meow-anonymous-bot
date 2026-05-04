@@ -28,7 +28,7 @@ from telegram.ext import (
 
 # ================== CONFIG ==================
 
-BOT_TOKEN = "8736334059:AAFkOqb5Bl5phPwqkGrUADUq2_Mdet2QV70"
+BOT_TOKEN = "8736334059:AAGtWIfuK-A1LhOz1bgEwEB6npWEYzz8tmA"
 
 BOT_NAME = "സമാദാനം"
 BOT_USERNAME = "samadanambot"
